@@ -16,10 +16,7 @@ const _muted = Color(0xFFAA9EAE);
 /// when the application closes. This is not production authentication.
 class DemoAuthGate extends StatefulWidget {
   const DemoAuthGate({super.key, required this.appBuilder});
-  final Widget Function(
-  BuildContext,
-  Future<bool> Function(String oldPassword, String newPassword),
-) appBuilder;
+  final WidgetBuilder appBuilder;
 
   @override
   State<DemoAuthGate> createState() => _DemoAuthGateState();
