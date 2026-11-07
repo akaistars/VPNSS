@@ -80,7 +80,14 @@ class _DemoAuthGateState extends State<DemoAuthGate> with TickerProviderStateMix
     setState(() => _entering = true);
     _weave.forward(from: 0);
   }
+  Future<bool> _changePassword(String oldPassword, String newPassword) async {
+    if (_password == null || oldPassword != _password) {
+      return false;
+    }
 
+    setState(() => _password = newPassword);
+    return true;
+  }
   Future<void> _recover() async {
     if (_username == null) {
       _message('Сначала создайте демо-аккаунт.');
@@ -185,7 +192,7 @@ class _DemoAuthGateState extends State<DemoAuthGate> with TickerProviderStateMix
     if (_authorized) {
       return FadeTransition(
         opacity: CurvedAnimation(parent: _entry, curve: Curves.easeInOut),
-        child: widget.appBuilder(context),
+        widget.appBuilder(context, _changePassword),
       );
     }
 
