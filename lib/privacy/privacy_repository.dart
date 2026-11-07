@@ -9,6 +9,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 abstract interface class PrivacyRepository {
   String get username;
   String? get email;
+
   Future<String> sendVerificationCode({required String purpose, required String target});
   Future<void> confirmVerificationCode({required String challengeId, required String code});
   Future<void> changeUsername({required String username, required String challengeId});
@@ -17,9 +18,8 @@ abstract interface class PrivacyRepository {
   Future<void> unlinkEmail({required String currentPassword, required String challengeId});
 }
 
-/// Session-scoped, memory-only DEMO repository. Use this implementation for
-/// deterministic UI/unit tests; use [SecureDemoPrivacyRepository.open] for the
-/// app so demo profile data survives restarts without a plaintext password.
+/// In-memory DEMO repository for isolated tests. App code should use the
+/// secure-storage subclass. Challenges remain ephemeral and expire after 10m.
 class DemoPrivacyRepository implements PrivacyRepository {
   DemoPrivacyRepository({String username = 'spider_user', String? email, String demoPassword = 'DemoPass123!'})
       : _username = username,
@@ -27,6 +27,9 @@ class DemoPrivacyRepository implements PrivacyRepository {
         _demoPassword = demoPassword;
 
   static const demoCode = '123456';
+  static const _purposes = {'link_email', 'change_email', 'change_username', 'change_password', 'unlink_email'};
+  static const _emailPurposes = {'link_email', 'change_email'};
+  static const _requiresLinkedEmail = {'change_username', 'change_password', 'unlink_email'};
   String _username;
   String? _email;
   String _demoPassword;
@@ -66,7 +69,7 @@ class DemoPrivacyRepository implements PrivacyRepository {
     challenge.verified = true;
   }
 
-  _Challenge _verified(String id, String purpose) {
+  _Challenge verifiedChallenge(String id, String purpose) {
     final challenge = _challenges[id];
     if (challenge == null || !challenge.verified || challenge.consumed || challenge.purpose != purpose || !DateTime.now().isBefore(challenge.expiresAt)) {
       throw const PrivacyDemoException('verification_required');
@@ -79,14 +82,14 @@ class DemoPrivacyRepository implements PrivacyRepository {
   Future<void> changeUsername({required String username, required String challengeId}) async {
     final value = username.trim();
     if (!RegExp(r'^[A-Za-z0-9._-]{3,32}$').hasMatch(value)) throw const PrivacyDemoException('invalid_username');
-    _verified(challengeId, 'change_username');
+    verifiedChallenge(challengeId, 'change_username');
     _username = value;
   }
 
   @override
   Future<void> changePassword({required String password, required String challengeId}) async {
     if (!isStrongPassword(password)) throw const PrivacyDemoException('weak_password');
-    _verified(challengeId, 'change_password');
+    verifiedChallenge(challengeId, 'change_password');
     _demoPassword = password;
   }
 
@@ -107,22 +110,17 @@ class DemoPrivacyRepository implements PrivacyRepository {
   @override
   Future<void> unlinkEmail({required String currentPassword, required String challengeId}) async {
     if (currentPassword != _demoPassword) throw const PrivacyDemoException('invalid_password');
-    _verified(challengeId, 'unlink_email');
+    verifiedChallenge(challengeId, 'unlink_email');
     _email = null;
   }
 
   static bool isValidGmail(String value) => RegExp(r'^[A-Z0-9._%+-]+@gmail\.com$', caseSensitive: false).hasMatch(value);
   static bool isStrongPassword(String value) => value.length >= 10 && value.length <= 128 && RegExp(r'[a-z]').hasMatch(value) && RegExp(r'[A-Z]').hasMatch(value) && RegExp(r'\d').hasMatch(value);
-
-  static const _purposes = {'link_email', 'change_email', 'change_username', 'change_password', 'unlink_email'};
-  static const _emailPurposes = {'link_email', 'change_email'};
-  static const _requiresLinkedEmail = {'change_username', 'change_password', 'unlink_email'};
 }
 
-/// Persisted DEMO account using OS-backed secure storage. Password material is
-/// stored only as a salted PBKDF2-HMAC-SHA256 verifier (never plaintext).
-/// Verification challenges intentionally remain memory-only and expire on app
-/// restart, matching the one-time/short-lived nature of the demo code flow.
+/// Persistent local DEMO account. User profile and a salted PBKDF2 password
+/// verifier are stored using OS-backed secure storage; raw passwords and OTPs
+/// are never persisted. OTP challenges intentionally expire on app restart.
 class SecureDemoPrivacyRepository extends DemoPrivacyRepository {
   SecureDemoPrivacyRepository._(this._storage, {required super.username, super.email, required super.demoPassword});
 
@@ -130,27 +128,26 @@ class SecureDemoPrivacyRepository extends DemoPrivacyRepository {
   final FlutterSecureStorage _storage;
   late String _passwordSalt;
   late String _passwordVerifier;
-  late Future<void> _ready;
-  bool _loading = true;
+  bool _ready = false;
 
   static Future<SecureDemoPrivacyRepository> open({FlutterSecureStorage? storage}) async {
-    final secureStorage = storage ?? const FlutterSecureStorage();
+    const secure = FlutterSecureStorage();
+    final secureStorage = storage ?? secure;
     const defaultPassword = 'DemoPass123!';
-    final saved = await secureStorage.read(key: _storageKey);
     Map<String, dynamic>? state;
-    if (saved != null) {
-      try { state = jsonDecode(saved) as Map<String, dynamic>; } catch (_) { state = null; }
+    final serialized = await secureStorage.read(key: _storageKey);
+    if (serialized != null) {
+      try { state = jsonDecode(serialized) as Map<String, dynamic>; } catch (_) { state = null; }
     }
+    final salt = state?['passwordSalt'] as String? ?? _randomSalt();
     final repository = SecureDemoPrivacyRepository._(
       secureStorage,
       username: state?['username'] as String? ?? 'spider_user',
       email: state?['email'] as String?,
       demoPassword: defaultPassword,
-    );
-    repository._passwordSalt = state?['passwordSalt'] as String? ?? _randomSalt();
-    repository._passwordVerifier = state?['passwordVerifier'] as String? ?? _derive(defaultPassword, repository._passwordSalt);
-    repository._loading = false;
-    repository._ready = Future<void>.value();
+    ).._passwordSalt = salt;
+    repository._passwordVerifier = state?['passwordVerifier'] as String? ?? _derive(defaultPassword, salt);
+    repository._ready = true;
     if (state == null) await repository._persist();
     return repository;
   }
@@ -161,7 +158,7 @@ class SecureDemoPrivacyRepository extends DemoPrivacyRepository {
   }
 
   static String _derive(String password, String salt) {
-    // PBKDF2-HMAC-SHA256, 120k iterations, 32-byte output.
+    // PBKDF2-HMAC-SHA256 with 120,000 iterations and a 256-bit result.
     const iterations = 120000;
     final hmac = Hmac(sha256, utf8.encode(password));
     final saltBytes = base64Url.decode(base64Url.normalize(salt));
@@ -178,16 +175,14 @@ class SecureDemoPrivacyRepository extends DemoPrivacyRepository {
 
   @override
   Future<void> changeUsername({required String username, required String challengeId}) async {
-    await _ready;
     await super.changeUsername(username: username, challengeId: challengeId);
     await _persist();
   }
 
   @override
   Future<void> changePassword({required String password, required String challengeId}) async {
-    await _ready;
     if (!isStrongPassword(password)) throw const PrivacyDemoException('weak_password');
-    _verified(challengeId, 'change_password');
+    verifiedChallenge(challengeId, 'change_password');
     _passwordSalt = _randomSalt();
     _passwordVerifier = _derive(password, _passwordSalt);
     await _persist();
@@ -195,22 +190,20 @@ class SecureDemoPrivacyRepository extends DemoPrivacyRepository {
 
   @override
   Future<void> unlinkEmail({required String currentPassword, required String challengeId}) async {
-    await _ready;
     if (_derive(currentPassword, _passwordSalt) != _passwordVerifier) throw const PrivacyDemoException('invalid_password');
-    _verified(challengeId, 'unlink_email');
+    verifiedChallenge(challengeId, 'unlink_email');
     _email = null;
     await _persist();
   }
 
   @override
   Future<void> changeEmail({required String email, required String challengeId}) async {
-    await _ready;
     await super.changeEmail(email: email, challengeId: challengeId);
     await _persist();
   }
 
   Future<void> _persist() async {
-    if (_loading) return;
+    if (!_ready) return;
     await _storage.write(key: _storageKey, value: jsonEncode({
       'username': username,
       'email': email,
