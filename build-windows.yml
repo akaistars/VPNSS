@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
   push:
     branches:
- - main
+      - main
     paths:
- - "main.dart"
- - "demo_auth_gate.dart
- - "split_tunnel_screen.dart
- - "pubspec.yaml"
- - ".github/workflows/build-windows.yml"
+      - "main.dart"
+      - "demo_auth_gate.dart"
+      - "split_tunnel_screen.dart"
+      - "pubspec.yaml"
+      - ".github/workflows/build-windows.yml"
 
 permissions:
   contents: read
@@ -21,42 +21,47 @@ jobs:
     runs-on: windows-latest
 
     steps:
- - name: Check out repository
+      - name: Check out repository
         uses: actions/checkout@v4
 
- - name: Set up Flutter
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
- - name: Move Dart sources into Flutter lib directory
+      - name: Move Dart sources into Flutter lib directory
         shell: pwsh
         run: |
- New-Item -ItemType Directory -Force -Path lib | Out-Null
- foreach ($file in @('main.dart', 'demo_auth_gate.dart', 'split_tunnel_screen.dart')) {
- $source = Join-Path (Get-Location) $file
- $destination = Join-Path (Join-Path (Get-Location) 'lib') $file
- if ((Test-Path $source) -and !(Test-Path $destination)) {
- Move-Item -Path $source -Destination $destination
+          New-Item -ItemType Directory -Force -Path lib | Out-Null
+
+          foreach ($file in @('main.dart', 'demo_auth_gate.dart', 'split_tunnel_screen.dart')) {
+            $source = Join-Path (Get-Location) $file
+            $destination = Join-Path (Join-Path (Get-Location) 'lib') $file
+
+            if ((Test-Path $source) -and !(Test-Path $destination)) {
+              Move-Item -Path $source -Destination $destination
             }
           }
- if (!(Test-Path 'lib/main.dart')) {
- throw 'lib/main.dart was not found. Check that main.dart exists in the repository root.'
+
+          if (!(Test-Path 'lib/main.dart')) {
+            throw 'lib/main.dart was not found. Check that main.dart exists in the repository root.'
           }
- - name: Generate Windows platform files if needed
+
+      - name: Generate Windows platform files if needed
         shell: pwsh
         run: |
- if (!(Test-Path 'windows')) {
- flutter create --platforms=windows --project-name spider_vpn .
+          if (!(Test-Path 'windows')) {
+            flutter create --platforms=windows --project-name spider_vpn .
           }
- - name: Install dependencies
+
+      - name: Install dependencies
         run: flutter pub get
 
- - name: Build Windows release
+      - name: Build Windows release
         run: flutter build windows --release
 
- - name: Upload Windows app
+      - name: Upload Windows app
         uses: actions/upload-artifact@v4
         with:
           name: SpiderVPN-Windows-Demo
