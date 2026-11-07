@@ -1,31 +1,28 @@
 # Spider VPN account API (deployment scaffold)
 
-This repository had no backend, database, or email provider. `backend/` adds a server-side foundation; the Flutter demo authentication is not yet a production identity system. Deploy this API and configure its secrets before relying on account operations. Never put SMTP credentials, JWT secrets, or verification peppers in Flutter.
+The repository originally contained only local demo authentication and no server, DB, or mail provider. `backend/` provides a deployable API foundation; it is **not active** until deployed, configured, and connected to the client. Never use client-only data as production identity.
 
-## Setup
+## Server setup
 
-1. Install Node.js 20+ and PostgreSQL 14+.
-2. Create a database and apply `schema.sql` (`psql "$DATABASE_URL" -f schema.sql`).
-3. Copy `.env.example` to `.env` and set strong random `JWT_SECRET` and `CODE_PEPPER` values, plus SMTP settings.
-4. Run `npm ci`, then `npm start` from `backend/`.
-5. Publish the API over HTTPS and set the Flutter `API_BASE_URL` to that origin when integrating the client.
+1. Node.js 20+ and PostgreSQL 14+.
+2. In `backend/`, run `npm ci`; create DB and apply `psql "$DATABASE_URL" -f schema.sql`.
+3. Set required secrets using your hosting provider's secret manager, not a committed `.env`: `DATABASE_URL`, `JWT_SECRET` (32+ random bytes), `CODE_PEPPER` (different 32+ random bytes), `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM`.
+4. Configure provider-issued SMTP/app credentials, verified sender/domain and SPF/DKIM/DMARC. Use TLS and HTTPS. Restrict PostgreSQL networking, enable encrypted backups and monitoring.
+5. Deploy `node src/server.js`, add health monitoring at `/health`, and point the client at `--dart-define=SPIDER_API_URL=https://api.example.com/`.
 
-SMTP account requirements: configure the provider's SMTP host/port, TLS, sender address and provider-issued app/API password as server environment variables. Do not commit `.env` or print codes/secrets in logs. For production, terminate TLS at a trusted proxy, restrict network access to PostgreSQL, configure backups, and use a managed secrets store.
+The API uses Argon2id password hashes, JWT-backed revocable sessions stored in PostgreSQL, server-generated six-digit codes (10-minute expiry, attempt and send limits, HMAC pepper at rest), single-use verification grants, unique usernames/emails, and no secret/code logging. Email unlink requires the current password and an OTP to the currently verified email. Code delivery fails closed without SMTP configuration.
 
-## API overview
+## API
 
-- `POST /v1/auth/register` `{username,password}`
-- `POST /v1/auth/login` `{username,password}`
-- `GET /v1/account` (Bearer session token)
-- `POST /v1/verification/send` `{purpose,email?}` (Bearer)
-- `POST /v1/verification/confirm` `{challengeId,code}` (Bearer) returns a short-lived, single-use grant
-- `PATCH /v1/account/username` `{username,grant}` (Bearer)
-- `PATCH /v1/account/password` `{password,grant}` (Bearer)
-- `PATCH /v1/account/email` `{email,grant}` (Bearer)
-- `DELETE /v1/account/email` `{password,grant}` (Bearer)
+- `POST /v1/auth/register` and `/v1/auth/login`
+- `GET /v1/account` (Bearer session)
+- `POST /v1/verification/send` with purpose and optionally new email
+- `POST /v1/verification/confirm` with challengeId/code
+- `PATCH /v1/account/username`, `/v1/account/password`, `/v1/account/email`
+- `DELETE /v1/account/email`
 
-Codes expire after 10 minutes, are HMAC-hashed at rest, limited to five attempts, and consumed once. Sending is throttled per account. Passwords are Argon2id hashes. Unlinking also requires the current password and an OTP to the currently verified email. The API does not expose a development-only OTP bypass.
+The Flutter adapter in `lib/privacy/privacy_api.dart` supports auth registration/login and stores session tokens using `flutter_secure_storage`. `PrivacyAccountScreen` in `lib/privacy/privacy_account_screen.dart` provides account settings UI in the registration screen's dark/pink/rose palette. It deliberately refuses to simulate OTP verification when the API is unavailable.
 
-## Flutter status
+## Important integration boundary
 
-`lib/privacy/` contains the account API client and a privacy UI component in the registration screen's dark/pink Spider VPN style. The existing app still has local demo authentication and the profile's privacy action must be wired to this screen after the backend is deployed; do not treat the current demo login as server authentication. This separation is intentional: it avoids claiming email verification or password security that cannot be provided by a client-only demo.
+The existing `DemoAuthGate` remains a local-only demo and is not wired to this server account API. Before deployment, migrate the registration/login UI to `PrivacyApi.register/login`, retain the token using secure storage, and inject a configured `PrivacyApi` into the profile privacy route. Until that migration and server deployment are complete, the privacy screen is a prepared component, not a functioning production identity service. Do not promise successful email delivery or persistence from the current demo sign-in.
