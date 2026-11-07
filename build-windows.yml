@@ -1,0 +1,46 @@
+name: Build Windows demo
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "flutter_app/**"
+      - ".github/workflows/build-windows.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Windows app
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Windows platform files
+        working-directory: flutter_app
+        run: flutter create --platforms=windows .
+
+      - name: Install dependencies
+        working-directory: flutter_app
+        run: flutter pub get
+
+      - name: Build Windows release
+        working-directory: flutter_app
+        run: flutter build windows --release
+
+      - name: Upload Windows app
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpiderVPN-Windows-Demo
+          path: flutter_app/build/windows/x64/runner/Release/
+          if-no-files-found: error
+          retention-days: 14
