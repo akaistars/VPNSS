@@ -4,10 +4,8 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "main.dart"
+      - "lib/**"
       - "pubspec.yaml"
-      - "demo_auth_gate.dart"
-      - "split_tunnel_screen.dart"
       - ".github/workflows/build-windows.yml"
 
 permissions:
@@ -28,15 +26,14 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Show Flutter version
-        run: flutter --version
-
-      - name: Generate Windows platform files if needed
+      - name: Ensure Flutter project structure
         shell: bash
         run: |
-          if [ ! -d windows ]; then
-            flutter create --platforms=windows .
-          fi
+          mkdir -p lib
+          if [ -f main.dart ] && [ ! -f lib/main.dart ]; then mv main.dart lib/main.dart; fi
+          if [ -f demo_auth_gate.dart ] && [ ! -f lib/demo_auth_gate.dart ]; then mv demo_auth_gate.dart lib/demo_auth_gate.dart; fi
+          if [ -f split_tunnel_screen.dart ] && [ ! -f lib/split_tunnel_screen.dart ]; then mv split_tunnel_screen.dart lib/split_tunnel_screen.dart; fi
+          if [ ! -d windows ]; then flutter create --platforms=windows .; fi
 
       - name: Install dependencies
         run: flutter pub get
