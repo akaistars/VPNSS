@@ -4,7 +4,10 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "flutter_app/**"
+      - "main.dart"
+      - "pubspec.yaml"
+      - "demo_auth_gate.dart"
+      - "split_tunnel_screen.dart"
       - ".github/workflows/build-windows.yml"
 
 permissions:
@@ -25,22 +28,26 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Generate Windows platform files
-        working-directory: flutter_app
-        run: flutter create --platforms=windows .
+      - name: Show Flutter version
+        run: flutter --version
+
+      - name: Generate Windows platform files if needed
+        shell: bash
+        run: |
+          if [ ! -d windows ]; then
+            flutter create --platforms=windows .
+          fi
 
       - name: Install dependencies
-        working-directory: flutter_app
         run: flutter pub get
 
       - name: Build Windows release
-        working-directory: flutter_app
         run: flutter build windows --release
 
       - name: Upload Windows app
         uses: actions/upload-artifact@v4
         with:
           name: SpiderVPN-Windows-Demo
-          path: flutter_app/build/windows/x64/runner/Release/
+          path: build/windows/x64/runner/Release/
           if-no-files-found: error
           retention-days: 14
